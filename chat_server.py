@@ -156,7 +156,7 @@ async def handle_client(reader, writer):
 async def main():
     load_state()
     saver = asyncio.create_task(periodic_save())
-    server = await asyncio.start_server(handle_client, '127.0.0.1', 8888)
+    server = await asyncio.start_server(handle_client, '0.0.0.0', 8888)
     try:
         async with server:
             await server.serve_forever()
