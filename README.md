@@ -4,7 +4,7 @@ A small asyncio TCP chat server. Multi-room, plaintext, with in-memory state and
 
 ## Connect
 
-1. Run `nc <server-address> <port>` (ask me for the address and port).
+1. Run `nc <server-address> <port>` (*ask me for the address and port*).
 2. Enter the password when prompted (*ask me if you know me*).
 3. Pick a username.
 4. Start chatting.
