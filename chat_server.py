@@ -7,6 +7,10 @@ STATE_FILE = "chat_state.json"
 SAVE_INTERVAL = 10  # seconds
 HISTORY_LEN = 10
 
+CHAT_PASSWORD = os.environ.get("CHAT_PASSWORD")
+if not CHAT_PASSWORD:
+    raise SystemExit("CHAT_PASSWORD environment variable is required")
+
 rooms: dict[str, dict[str, asyncio.StreamWriter]] = {}
 user_room: dict[str, str] = {}
 last_room: dict[str, str] = {}
@@ -100,6 +104,14 @@ async def handle_client(reader, writer):
     username = None
     quitting = False
     try:
+        writer.write(b"Password: ")
+        await writer.drain()
+        password_bytes = await reader.readline()
+        if password_bytes.decode().strip() != CHAT_PASSWORD:
+            writer.write(b"Wrong password.\n")
+            await writer.drain()
+            return
+
         writer.write(b"Username: ")
         username_bytes = await reader.readline()
         username = username_bytes.decode().strip()
