@@ -12,15 +12,13 @@ Split the script into a package: hub (chat logic, no I/O), events, TCP transport
 
 `Message` (room, sender, text, unix `ts`) is now the unit stored in the room deque and on disk, as a list of `{"sender", "text", "ts"}` objects per room. Wire text for `nc` is unchanged.
 
-## 3. Hardening `[ ]`
+## 3. Hardening `[x]`
 
-Small, independent items. Each is a few lines plus a test now that the hub is isolated.
-
-- Join notification to the room being entered (there is none today, only a leave notice).
-- Reject empty or malformed usernames and room names; cap message length.
-- Constant-time password compare (`hmac.compare_digest`) and a delay after failed attempts.
-- Structured logging instead of `print`.
-- Optional: prune rooms that are empty and have no history.
+- Entering a room now notifies its members (`UserJoined`, rendered as `bob has joined gaming.`), mirroring the leave notice.
+- Usernames and room names must match `[A-Za-z0-9_-]{1,32}`. A bad username closes the connection; a bad `/join` argument is an error and the user stays put. Messages over 1000 characters are rejected; empty lines are dropped.
+- Password compare uses `hmac.compare_digest`, and a wrong password stalls the connection for 2 seconds before the rejection to slow guessing.
+- `logging` replaces `print`: connections, logins, joins, auth failures and save errors, with `--log-level`.
+- Rooms with no members and no history are deleted when the last member leaves.
 
 ## 4. JSON-lines transport `[ ]`
 
@@ -48,7 +46,7 @@ Dockerfile or systemd unit, with a persistent volume or directory for the state 
 
 ## Notes
 
-- History is capped at 10 messages per room, kept in memory and on disk whether or not the room has members. Rooms are never deleted.
+- History is capped at 10 messages per room, kept in memory and on disk whether or not the room has members. A room is deleted only when it is empty and has no history.
 - On-disk history entries carry a unix timestamp.
 - State is written every `--save-interval` seconds (default 10) and once on Ctrl-C. A crash can lose up to one interval of messages.
 - Run tests with `.venv/bin/pytest`. Run the server with `CHAT_PASSWORD=... python3 -m chat_server`.

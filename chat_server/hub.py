@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
+import logging
+import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
-from .events import Error, Event, History, Info, Message, Presence, UserLeft
+from .events import Error, Event, History, Info, Message, Presence, UserJoined, UserLeft
+
+log = logging.getLogger(__name__)
 
 LOBBY = "lobby"
+NAME_RULE = "1-32 characters: letters, digits, _ or -"
+_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,32}")
+MAX_MESSAGE_LEN = 1000
+
+
+def valid_name(name: str) -> bool:
+    """True if `name` is acceptable as a username or room name."""
+    return _NAME_RE.fullmatch(name) is not None
 
 
 class Sink(Protocol):
@@ -17,6 +29,10 @@ class Sink(Protocol):
 
 
 class UsernameTaken(Exception):
+    pass
+
+
+class InvalidUsername(Exception):
     pass
 
 
@@ -47,9 +63,15 @@ class Room:
 
 
 class Hub:
-    def __init__(self, history_len: int = 10, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        history_len: int = 10,
+        clock: Callable[[], float] = time.time,
+        max_message_len: int = MAX_MESSAGE_LEN,
+    ) -> None:
         self.history_len = history_len
         self.clock = clock
+        self.max_message_len = max_message_len
         self.rooms: dict[str, Room] = {}
         self.sessions: dict[str, Session] = {}
         self.last_room: dict[str, str] = {}
@@ -69,16 +91,21 @@ class Hub:
         if room.history:
             session.send(History(name, tuple(room.history)))
         self.who(session)
+        room.broadcast(UserJoined(name, session.username), exclude=session.username)
 
     def _leave(self, session: Session) -> None:
-        """Remove the session from its room. Rooms persist (they hold history)."""
+        """Remove the session from its room, notify the others, and drop the room if nothing is left."""
         room = self.rooms[session.room]
         room.members.pop(session.username, None)
         room.broadcast(UserLeft(room.name, session.username))
+        if not room.members and not room.history:
+            del self.rooms[room.name]
 
     # -- public API --------------------------------------------------------
 
     def login(self, username: str, sink: Sink) -> Session:
+        if not valid_name(username):
+            raise InvalidUsername(username)
         if username in self.sessions:
             raise UsernameTaken(username)
         room = self.last_room.pop(username, LOBBY)
@@ -87,6 +114,7 @@ class Hub:
         if room != LOBBY:
             session.send(Info(f"Welcome back — rejoined {room}."))
         self._enter(session, room)
+        log.info("login user=%s room=%s", username, room)
         return session
 
     def logout(self, session: Session, *, remember: bool = True) -> None:
@@ -96,17 +124,21 @@ class Hub:
         self._leave(session)
         if remember and room != LOBBY:
             self.last_room[session.username] = room
+        log.info("logout user=%s room=%s remembered=%s", session.username, room, remember and room != LOBBY)
 
     def join(self, session: Session, room: str | None) -> None:
         if not room:
             session.send(Error("Usage: /join <room>"))
             return
+        if not valid_name(room):
+            session.send(Error(f"Invalid room name ({NAME_RULE})."))
+            return
         if session.room == room:
             return
-        old = self.rooms[session.room]
-        old.members.pop(session.username, None)
+        old = session.room
+        self._leave(session)
         self._enter(session, room)
-        old.broadcast(UserLeft(old.name, session.username))
+        log.info("join user=%s room=%s from=%s", session.username, room, old)
 
     def who(self, session: Session) -> None:
         room = self.rooms[session.room]
@@ -114,6 +146,11 @@ class Hub:
         session.send(Presence(room.name, others))
 
     def say(self, session: Session, text: str) -> None:
+        if not text:
+            return
+        if len(text) > self.max_message_len:
+            session.send(Error(f"Message too long (max {self.max_message_len} characters)."))
+            return
         room = self.rooms[session.room]
         message = Message(room.name, session.username, text, self.clock())
         room.history.append(message)

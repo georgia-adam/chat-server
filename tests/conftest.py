@@ -69,7 +69,7 @@ class Server:
 @pytest.fixture
 async def server():
     hub = Hub()
-    srv = await serve(hub, PASSWORD, "127.0.0.1", 0)
+    srv = await serve(hub, PASSWORD, "127.0.0.1", 0, fail_delay=0)
     s = Server(hub, srv.port)
     s.srv = srv
     yield s

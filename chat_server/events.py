@@ -39,6 +39,12 @@ class Presence:
 
 
 @dataclass(frozen=True)
+class UserJoined:
+    room: str
+    username: str
+
+
+@dataclass(frozen=True)
 class UserLeft:
     room: str
     username: str
@@ -54,4 +60,4 @@ class Error:
     text: str
 
 
-Event = Message | History | Presence | UserLeft | Info | Error
+Event = Message | History | Presence | UserJoined | UserLeft | Info | Error

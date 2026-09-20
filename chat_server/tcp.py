@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
+import logging
 
-from .events import Error, Event, History, Info, Message, Presence, UserLeft
-from .hub import Hub, Session, UsernameTaken
+from .events import Error, Event, History, Info, Message, Presence, UserJoined, UserLeft
+from .hub import NAME_RULE, Hub, InvalidUsername, Session, UsernameTaken
+
+log = logging.getLogger(__name__)
 
 QUEUE_SIZE = 256
+FAIL_DELAY = 2.0  # seconds to stall a client after a wrong password
 _CLOSE = None  # sentinel telling the pump to stop after flushing
 
 
@@ -24,6 +29,8 @@ def render(event: Event) -> bytes:
             )
         case Presence(room, others):
             out = f"Users in {room}: {', '.join(others)}\n" if others else f"You are the only user in {room}.\n"
+        case UserJoined(room, username):
+            out = f"{username} has joined {room}.\n"
         case UserLeft(room, username):
             out = f"{username} has left {room}.\n"
         case Info(text) | Error(text):
@@ -73,18 +80,37 @@ async def pump(sink: QueueSink, writer: asyncio.StreamWriter) -> None:
 COMMANDS = ("/join", "/who", "/quit")
 
 
+def password_matches(supplied: str, expected: str) -> bool:
+    """Constant-time comparison so response timing does not leak how much of the password matched."""
+    return hmac.compare_digest(supplied.encode(), expected.encode())
+
+
+def _peer(writer: asyncio.StreamWriter) -> str:
+    addr = writer.get_extra_info("peername")
+    return f"{addr[0]}:{addr[1]}" if addr else "?"
+
+
 async def handle_client(
-    hub: Hub, password: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    hub: Hub,
+    password: str,
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    *,
+    fail_delay: float = FAIL_DELAY,
 ) -> None:
+    peer = _peer(writer)
     session: Session | None = None
     sink = QueueSink()
     pump_task: asyncio.Task | None = None
     quitting = False
+    log.info("connected peer=%s", peer)
     try:
         writer.write(b"Password: ")
         await writer.drain()
         line = await reader.readline()
-        if line.decode(errors="replace").strip() != password:
+        if not password_matches(line.decode(errors="replace").strip(), password):
+            log.warning("auth failed peer=%s", peer)
+            await asyncio.sleep(fail_delay)
             writer.write(b"Wrong password.\n")
             await writer.drain()
             return
@@ -94,7 +120,13 @@ async def handle_client(
         username = (await reader.readline()).decode(errors="replace").strip()
         try:
             session = hub.login(username, sink)
+        except InvalidUsername:
+            log.warning("invalid username peer=%s username=%r", peer, username)
+            writer.write(f"Invalid username ({NAME_RULE}). Closing connection.".encode())
+            await writer.drain()
+            return
         except UsernameTaken:
+            log.warning("username taken peer=%s username=%s", peer, username)
             writer.write(b"Username already taken. Closing connection.")
             await writer.drain()
             return
@@ -135,19 +167,22 @@ async def handle_client(
             await writer.wait_closed()
         except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
             pass
+        log.info("disconnected peer=%s user=%s", peer, session.username if session else None)
 
 
 class ChatServer:
     """A listening server plus the client connections it has accepted."""
 
-    def __init__(self, hub: Hub, password: str) -> None:
+    def __init__(self, hub: Hub, password: str, *, fail_delay: float = FAIL_DELAY) -> None:
         self.hub = hub
         self.password = password
+        self.fail_delay = fail_delay
         self.server: asyncio.Server | None = None
         self.writers: set[asyncio.StreamWriter] = set()
 
     async def start(self, host: str, port: int) -> None:
         self.server = await asyncio.start_server(self._handle, host, port)
+        log.info("listening host=%s port=%s", host, self.port)
 
     @property
     def port(self) -> int:
@@ -174,12 +209,14 @@ class ChatServer:
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self.writers.add(writer)
         try:
-            await handle_client(self.hub, self.password, reader, writer)
+            await handle_client(self.hub, self.password, reader, writer, fail_delay=self.fail_delay)
         finally:
             self.writers.discard(writer)
 
 
-async def serve(hub: Hub, password: str, host: str, port: int) -> ChatServer:
-    chat = ChatServer(hub, password)
+async def serve(
+    hub: Hub, password: str, host: str, port: int, *, fail_delay: float = FAIL_DELAY
+) -> ChatServer:
+    chat = ChatServer(hub, password, fail_delay=fail_delay)
     await chat.start(host, port)
     return chat

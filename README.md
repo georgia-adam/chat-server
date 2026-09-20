@@ -6,12 +6,12 @@ A small asyncio TCP chat server. Multi-room, plaintext, with in-memory state and
 
 1. Run `nc <server-address> <port>` (*ask me for the address and port*).
 2. Enter the password when prompted (*ask me if you know me*).
-3. Pick a username.
+3. Pick a username (1-32 characters: letters, digits, `_` or `-`).
 4. Start chatting.
 
 **Commands:**
 
-- `/join <room>` — switch rooms (default is `lobby`)
+- `/join <room>` — switch rooms (default is `lobby`; same naming rule as usernames)
 - `/who` — list users in your room
 - `/quit` — disconnect
 
@@ -25,7 +25,7 @@ Requires Python 3.10+. No external dependencies.
 CHAT_PASSWORD=hunter2 python3 -m chat_server
 ```
 
-Options: `--host` (default `0.0.0.0`), `--port` (default `8888`), `--state-file` (default `chat_state.json`), `--save-interval` seconds (default `10`).
+Options: `--host` (default `0.0.0.0`), `--port` (default `8888`), `--state-file` (default `chat_state.json`), `--save-interval` seconds (default `10`), `--log-level` (default `INFO`).
 
 Then connect from another terminal:
 

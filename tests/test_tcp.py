@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from chat_server.events import Error, History, Info, Message, Presence, UserLeft
+from chat_server.events import Error, History, Info, Message, Presence, UserJoined, UserLeft
 from chat_server.tcp import QueueSink, render
 
 
@@ -13,6 +13,7 @@ def test_render_matches_original_wire_text():
     )
     assert render(Presence("lobby", ())) == b"You are the only user in lobby.\n"
     assert render(Presence("lobby", ("a", "b"))) == b"Users in lobby: a, b\n"
+    assert render(UserJoined("lobby", "alice")) == b"alice has joined lobby.\n"
     assert render(UserLeft("lobby", "alice")) == b"alice has left lobby.\n"
     assert render(Info("Welcome back — rejoined gaming.")) == "Welcome back — rejoined gaming.\n".encode()
     assert render(Error("Unknown command: /x")) == b"Unknown command: /x\n"
@@ -34,6 +35,23 @@ async def test_wrong_password_closes(server):
     await c.eof()
 
 
+async def test_wrong_password_is_delayed(server):
+    server.srv.fail_delay = 0.3
+    c = await server.raw()
+    await c.expect("Password: ")
+    started = asyncio.get_running_loop().time()
+    await c.send("nope")
+    assert await c.line() == "Wrong password.\n"
+    assert asyncio.get_running_loop().time() - started >= 0.3
+
+
+async def test_invalid_username_closes(server):
+    c = await server.connect("bad name")
+    assert (await c.line()).startswith("Invalid username (")
+    await c.eof()
+    assert server.hub.sessions == {}
+
+
 async def test_duplicate_username_rejected(server):
     a = await server.connect("alice")
     assert await a.line() == "You are the only user in lobby.\n"
@@ -47,6 +65,7 @@ async def test_message_reaches_others_but_is_not_echoed(server):
     assert await a.line() == "You are the only user in lobby.\n"
     b = await server.connect("bob")
     assert await b.line() == "Users in lobby: alice\n"
+    assert await a.line() == "bob has joined lobby.\n"
 
     await a.send("hi bob")
     assert await b.line() == "alice: hi bob\n"
@@ -59,6 +78,7 @@ async def test_join_who_and_command_errors(server):
     await a.line()
     b = await server.connect("bob")
     await b.line()
+    await a.line()  # bob has joined lobby.
 
     await a.send("/join gaming")
     assert await a.line() == "You are the only user in gaming.\n"
@@ -88,6 +108,7 @@ async def test_joiner_sees_history(server):
     assert await b.line() == "alice: first\n"
     assert await b.line() == "--- end history ---\n"
     assert await b.line() == "Users in gaming: alice\n"
+    assert await a.line() == "bob has joined gaming.\n"
 
 
 async def test_quit_forgets_room_but_disconnect_remembers_it(server):

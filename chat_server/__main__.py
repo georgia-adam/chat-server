@@ -1,10 +1,13 @@
 import argparse
 import asyncio
+import logging
 import os
 
 from .hub import Hub
 from .state import load_state, save_state
 from .tcp import serve
+
+log = logging.getLogger(__name__)
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -13,6 +16,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--port", type=int, default=8888)
     p.add_argument("--state-file", default="chat_state.json")
     p.add_argument("--save-interval", type=float, default=10, help="seconds between saves")
+    p.add_argument("--log-level", default="INFO", help="DEBUG, INFO, WARNING or ERROR")
     return p.parse_args(argv)
 
 
@@ -21,8 +25,8 @@ async def periodic_save(hub: Hub, path: str, interval: float) -> None:
         await asyncio.sleep(interval)
         try:
             save_state(path, hub.snapshot())
-        except Exception as e:
-            print(f"save_state failed: {e}")
+        except Exception:
+            log.exception("save failed path=%s", path)
 
 
 async def run(args: argparse.Namespace, password: str) -> None:
@@ -36,14 +40,20 @@ async def run(args: argparse.Namespace, password: str) -> None:
         saver.cancel()
         await server.close()  # logs everyone out so their rooms are remembered
         save_state(args.state_file, hub.snapshot())  # final save on shutdown
+        log.info("stopped")
 
 
 def main() -> None:
     password = os.environ.get("CHAT_PASSWORD")
     if not password:
         raise SystemExit("CHAT_PASSWORD environment variable is required")
+    args = parse_args()
+    logging.basicConfig(
+        level=args.log_level.upper(),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
     try:
-        asyncio.run(run(parse_args(), password))
+        asyncio.run(run(args, password))
     except KeyboardInterrupt:
         pass
 

@@ -1,7 +1,7 @@
 import pytest
 
-from chat_server.events import Error, History, Info, Message, Presence, UserLeft
-from chat_server.hub import Hub, UsernameTaken
+from chat_server.events import Error, History, Info, Message, Presence, UserJoined, UserLeft
+from chat_server.hub import Hub, InvalidUsername, UsernameTaken
 
 T = 1_700_000_000.0
 
@@ -164,3 +164,64 @@ def test_snapshot_round_trips_and_skips_rooms_without_history():
     hub.join(a, "empty")
     assert "empty" not in hub.snapshot()["room_history"]
 
+
+def test_entering_a_room_notifies_its_members():
+    hub = make_hub()
+    a, a_sink = login(hub, "alice")
+    b, b_sink = login(hub, "bob")
+    assert a_sink == [UserJoined("lobby", "bob")]
+    assert b_sink == []
+
+    a_sink.clear()
+    hub.join(a, "gaming")
+    hub.join(b, "gaming")
+    assert a_sink == [Presence("gaming", ()), UserJoined("gaming", "bob")]
+
+
+@pytest.mark.parametrize("name", ["", " ", "a b", "x" * 33, "/bad", "caf\u00e9", "a\n"])
+def test_invalid_username_rejected(name):
+    hub = make_hub()
+    with pytest.raises(InvalidUsername):
+        hub.login(name, ListSink())
+    assert hub.sessions == {}
+
+
+def test_valid_usernames_accepted():
+    hub = make_hub()
+    for name in ["a", "Alice_1", "x-y", "x" * 32]:
+        hub.login(name, ListSink())
+    assert len(hub.sessions) == 4
+
+
+def test_invalid_room_name_is_error_and_user_stays_put():
+    hub = make_hub()
+    a, a_sink = login(hub, "alice")
+    hub.join(a, "bad room")
+    assert a.room == "lobby"
+    assert len(a_sink) == 1 and isinstance(a_sink[0], Error)
+    assert "bad room" not in hub.rooms
+
+
+def test_empty_message_is_dropped_and_long_message_rejected():
+    hub = make_hub(max_message_len=5)
+    a, a_sink = login(hub, "alice")
+    b, b_sink = login(hub, "bob")
+    a_sink.clear()
+    hub.say(a, "")
+    hub.say(a, "toolong")
+    hub.say(a, "12345")
+    assert b_sink == [Message("lobby", "alice", "12345", T)]
+    assert a_sink == [Error("Message too long (max 5 characters).")]
+    assert [m.text for m in hub.rooms["lobby"].history] == ["12345"]
+
+
+def test_empty_room_without_history_is_pruned():
+    hub = make_hub()
+    a, _ = login(hub, "alice")
+    hub.join(a, "gaming")
+    assert "lobby" not in hub.rooms  # alice was its only member and it had no history
+    hub.join(a, "lobby")
+    assert "gaming" not in hub.rooms
+    hub.say(a, "hello")
+    hub.logout(a)
+    assert list(hub.rooms) == ["lobby"]  # history keeps it alive
