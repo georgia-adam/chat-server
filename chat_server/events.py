@@ -1,15 +1,25 @@
 """Events emitted by the Hub. Transports render these into wire format."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
 class Message:
-    """A chat message from another user in the room."""
+    """A chat message. Also the unit stored in room history and on disk."""
 
     room: str
     sender: str
     text: str
+    ts: float | None = None  # unix time
+
+    def to_dict(self) -> dict:
+        return {"sender": self.sender, "text": self.text, "ts": self.ts}
+
+    @classmethod
+    def from_dict(cls, room: str, data: dict) -> Message:
+        return cls(room, data["sender"], data["text"], data.get("ts"))
 
 
 @dataclass(frozen=True)
@@ -17,7 +27,7 @@ class History:
     """Recent messages in a room, sent on entering it."""
 
     room: str
-    lines: tuple[str, ...] = field(default_factory=tuple)
+    messages: tuple[Message, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

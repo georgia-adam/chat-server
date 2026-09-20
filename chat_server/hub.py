@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Callable, Protocol
 
 from .events import Error, Event, History, Info, Message, Presence, UserLeft
 
@@ -34,7 +35,7 @@ class Room:
     name: str
     history_len: int
     members: dict[str, Session] = field(default_factory=dict)
-    history: deque[str] = field(init=False)
+    history: deque[Message] = field(init=False)
 
     def __post_init__(self) -> None:
         self.history = deque(maxlen=self.history_len)
@@ -46,8 +47,9 @@ class Room:
 
 
 class Hub:
-    def __init__(self, history_len: int = 10) -> None:
+    def __init__(self, history_len: int = 10, clock: Callable[[], float] = time.time) -> None:
         self.history_len = history_len
+        self.clock = clock
         self.rooms: dict[str, Room] = {}
         self.sessions: dict[str, Session] = {}
         self.last_room: dict[str, str] = {}
@@ -113,8 +115,9 @@ class Hub:
 
     def say(self, session: Session, text: str) -> None:
         room = self.rooms[session.room]
-        room.history.append(f"{session.username}: {text}\n")
-        room.broadcast(Message(room.name, session.username, text), exclude=session.username)
+        message = Message(room.name, session.username, text, self.clock())
+        room.history.append(message)
+        room.broadcast(message, exclude=session.username)
 
     # -- persistence -------------------------------------------------------
 
@@ -122,11 +125,11 @@ class Hub:
         return {
             "last_room": dict(self.last_room),
             "room_history": {
-                name: list(r.history) for name, r in self.rooms.items() if r.history
+                name: [m.to_dict() for m in r.history] for name, r in self.rooms.items() if r.history
             },
         }
 
     def restore(self, data: dict) -> None:
         self.last_room.update(data.get("last_room", {}))
-        for name, lines in data.get("room_history", {}).items():
-            self._room(name).history.extend(lines)
+        for name, entries in data.get("room_history", {}).items():
+            self._room(name).history.extend(Message.from_dict(name, e) for e in entries)

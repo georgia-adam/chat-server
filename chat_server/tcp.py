@@ -16,8 +16,12 @@ def render(event: Event) -> bytes:
     match event:
         case Message(_, sender, text):
             out = f"{sender}: {text}\n"
-        case History(room, lines):
-            out = f"--- last {len(lines)} messages in {room} ---\n" + "".join(lines) + "--- end history ---\n"
+        case History(room, messages):
+            out = (
+                f"--- last {len(messages)} messages in {room} ---\n"
+                + "".join(f"{m.sender}: {m.text}\n" for m in messages)
+                + "--- end history ---\n"
+            )
         case Presence(room, others):
             out = f"Users in {room}: {', '.join(others)}\n" if others else f"You are the only user in {room}.\n"
         case UserLeft(room, username):

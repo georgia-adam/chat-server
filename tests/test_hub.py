@@ -3,6 +3,12 @@ import pytest
 from chat_server.events import Error, History, Info, Message, Presence, UserLeft
 from chat_server.hub import Hub, UsernameTaken
 
+T = 1_700_000_000.0
+
+
+def make_hub(**kwargs) -> Hub:
+    return Hub(clock=lambda: T, **kwargs)
+
 
 class ListSink(list):
     def send(self, event):
@@ -17,7 +23,7 @@ def login(hub, name):
 
 
 def test_first_login_lands_in_lobby_and_reports_presence():
-    hub = Hub()
+    hub = make_hub()
     sink = ListSink()
     session = hub.login("alice", sink)
     assert session.room == "lobby"
@@ -25,33 +31,33 @@ def test_first_login_lands_in_lobby_and_reports_presence():
 
 
 def test_duplicate_username_rejected():
-    hub = Hub()
+    hub = make_hub()
     hub.login("alice", ListSink())
     with pytest.raises(UsernameTaken):
         hub.login("alice", ListSink())
 
 
 def test_say_reaches_others_only_and_records_history():
-    hub = Hub()
+    hub = make_hub()
     a, a_sink = login(hub, "alice")
     b, b_sink = login(hub, "bob")
     a_sink.clear()
     hub.say(a, "hi")
     assert a_sink == []
-    assert b_sink == [Message("lobby", "alice", "hi")]
-    assert list(hub.rooms["lobby"].history) == ["alice: hi\n"]
+    assert b_sink == [Message("lobby", "alice", "hi", T)]
+    assert list(hub.rooms["lobby"].history) == [Message("lobby", "alice", "hi", T)]
 
 
 def test_history_is_capped():
-    hub = Hub(history_len=2)
+    hub = make_hub(history_len=2)
     a, _ = login(hub, "alice")
     for i in range(3):
         hub.say(a, str(i))
-    assert list(hub.rooms["lobby"].history) == ["alice: 1\n", "alice: 2\n"]
+    assert [m.text for m in hub.rooms["lobby"].history] == ["1", "2"]
 
 
 def test_join_moves_user_and_notifies_old_room():
-    hub = Hub()
+    hub = make_hub()
     a, a_sink = login(hub, "alice")
     b, b_sink = login(hub, "bob")
     hub.say(b, "old news")
@@ -68,18 +74,21 @@ def test_join_moves_user_and_notifies_old_room():
 
 
 def test_join_shows_history_then_presence():
-    hub = Hub()
+    hub = make_hub()
     a, _ = login(hub, "alice")
     hub.join(a, "gaming")
     hub.say(a, "first")
     b, b_sink = login(hub, "bob")
     b_sink.clear()
     hub.join(b, "gaming")
-    assert b_sink == [History("gaming", ("alice: first\n",)), Presence("gaming", ("alice",))]
+    assert b_sink == [
+        History("gaming", (Message("gaming", "alice", "first", T),)),
+        Presence("gaming", ("alice",)),
+    ]
 
 
 def test_join_same_room_is_noop_and_missing_arg_is_error():
-    hub = Hub()
+    hub = make_hub()
     a, a_sink = login(hub, "alice")
     hub.join(a, "lobby")
     assert a_sink == []
@@ -88,17 +97,17 @@ def test_join_same_room_is_noop_and_missing_arg_is_error():
 
 
 def test_room_history_survives_room_emptying():
-    hub = Hub()
+    hub = make_hub()
     a, _ = login(hub, "alice")
     hub.join(a, "gaming")
     hub.say(a, "hello")
     hub.logout(a)
     assert hub.rooms["gaming"].members == {}
-    assert list(hub.rooms["gaming"].history) == ["alice: hello\n"]
+    assert [m.text for m in hub.rooms["gaming"].history] == ["hello"]
 
 
 def test_logout_remembers_room_and_rejoins():
-    hub = Hub()
+    hub = make_hub()
     a, _ = login(hub, "alice")
     hub.join(a, "gaming")
     b, b_sink = login(hub, "bob")
@@ -118,7 +127,7 @@ def test_logout_remembers_room_and_rejoins():
 
 
 def test_logout_with_quit_forgets_room_and_lobby_is_never_remembered():
-    hub = Hub()
+    hub = make_hub()
     a, _ = login(hub, "alice")
     hub.join(a, "gaming")
     hub.logout(a, remember=False)
@@ -130,26 +139,28 @@ def test_logout_with_quit_forgets_room_and_lobby_is_never_remembered():
 
 
 def test_logout_twice_is_harmless():
-    hub = Hub()
+    hub = make_hub()
     a, _ = login(hub, "alice")
     hub.logout(a)
     hub.logout(a)
     assert hub.sessions == {}
 
 
-def test_snapshot_matches_existing_file_shape_and_round_trips():
+def test_snapshot_round_trips_and_skips_rooms_without_history():
     data = {
-        "last_room": {"Miles": "gaming", "Jennifer": "gaming"},
+        "last_room": {"Miles": "gaming"},
         "room_history": {
-            "lobby": ["Miles: Hello jennifer\n"],
-            "gaming": ["Jennifer: Hello\n", "Miles: Heyy in gaming now\n"],
+            "gaming": [
+                {"sender": "Jennifer", "text": "Hello", "ts": T},
+                {"sender": "Miles", "text": "Heyy in gaming now", "ts": T + 1},
+            ],
         },
     }
-    hub = Hub()
+    hub = make_hub()
     hub.restore(data)
     assert hub.snapshot() == data
 
-    # rooms that exist but have no history are left out of the snapshot
     a, _ = login(hub, "alice")
     hub.join(a, "empty")
     assert "empty" not in hub.snapshot()["room_history"]
+

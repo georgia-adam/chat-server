@@ -8,7 +8,7 @@ from chat_server.tcp import QueueSink, render
 
 def test_render_matches_original_wire_text():
     assert render(Message("lobby", "alice", "hi")) == b"alice: hi\n"
-    assert render(History("gaming", ("a: 1\n", "b: 2\n"))) == (
+    assert render(History("gaming", (Message("gaming", "a", "1", 1.0), Message("gaming", "b", "2")))) == (
         b"--- last 2 messages in gaming ---\na: 1\nb: 2\n--- end history ---\n"
     )
     assert render(Presence("lobby", ())) == b"You are the only user in lobby.\n"
