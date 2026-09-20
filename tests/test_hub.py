@@ -93,7 +93,7 @@ def test_join_same_room_is_noop_and_missing_arg_is_error():
     hub.join(a, "lobby")
     assert a_sink == []
     hub.join(a, None)
-    assert a_sink == [Error("Usage: /join <room>")]
+    assert a_sink == [Error("Usage: /join <room>", "usage")]
 
 
 def test_room_history_survives_room_emptying():
@@ -211,7 +211,7 @@ def test_empty_message_is_dropped_and_long_message_rejected():
     hub.say(a, "toolong")
     hub.say(a, "12345")
     assert b_sink == [Message("lobby", "alice", "12345", T)]
-    assert a_sink == [Error("Message too long (max 5 characters).")]
+    assert a_sink == [Error("Message too long (max 5 characters).", "message_too_long")]
     assert [m.text for m in hub.rooms["lobby"].history] == ["12345"]
 
 

@@ -58,6 +58,7 @@ class Info:
 @dataclass(frozen=True)
 class Error:
     text: str
+    code: str = "error"  # stable identifier for clients that react programmatically
 
 
 Event = Message | History | Presence | UserJoined | UserLeft | Info | Error

@@ -128,10 +128,10 @@ class Hub:
 
     def join(self, session: Session, room: str | None) -> None:
         if not room:
-            session.send(Error("Usage: /join <room>"))
+            session.send(Error("Usage: /join <room>", "usage"))
             return
         if not valid_name(room):
-            session.send(Error(f"Invalid room name ({NAME_RULE})."))
+            session.send(Error(f"Invalid room name ({NAME_RULE}).", "invalid_room"))
             return
         if session.room == room:
             return
@@ -149,7 +149,7 @@ class Hub:
         if not text:
             return
         if len(text) > self.max_message_len:
-            session.send(Error(f"Message too long (max {self.max_message_len} characters)."))
+            session.send(Error(f"Message too long (max {self.max_message_len} characters).", "message_too_long"))
             return
         room = self.rooms[session.room]
         message = Message(room.name, session.username, text, self.clock())

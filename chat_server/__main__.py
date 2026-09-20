@@ -5,6 +5,7 @@ import os
 
 from .hub import Hub
 from .state import load_state, save_state
+from .jsonl import serve as serve_jsonl
 from .tcp import serve
 
 log = logging.getLogger(__name__)
@@ -13,7 +14,8 @@ log = logging.getLogger(__name__)
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="chat_server", description="asyncio TCP chat server")
     p.add_argument("--host", default="0.0.0.0")
-    p.add_argument("--port", type=int, default=8888)
+    p.add_argument("--port", type=int, default=8888, help="nc-compatible TCP port")
+    p.add_argument("--jsonl-port", type=int, default=8889, help="JSON-lines port for programmatic clients")
     p.add_argument("--state-file", default="chat_state.json")
     p.add_argument("--save-interval", type=float, default=10, help="seconds between saves")
     p.add_argument("--log-level", default="INFO", help="DEBUG, INFO, WARNING or ERROR")
@@ -34,11 +36,13 @@ async def run(args: argparse.Namespace, password: str) -> None:
     hub.restore(load_state(args.state_file))
     saver = asyncio.create_task(periodic_save(hub, args.state_file, args.save_interval))
     server = await serve(hub, password, args.host, args.port)
+    jsonl = await serve_jsonl(hub, password, args.host, args.jsonl_port)
     try:
         await server.serve_forever()
     finally:
         saver.cancel()
         await server.close()  # logs everyone out so their rooms are remembered
+        await jsonl.close()
         save_state(args.state_file, hub.snapshot())  # final save on shutdown
         log.info("stopped")
 

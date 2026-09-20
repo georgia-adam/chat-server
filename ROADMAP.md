@@ -20,21 +20,17 @@ Split the script into a package: hub (chat logic, no I/O), events, TCP transport
 - `logging` replaces `print`: connections, logins, joins, auth failures and save errors, with `--log-level`.
 - Rooms with no members and no history are deleted when the last member leaves.
 
-## 4. JSON-lines transport `[ ]`
+## 4. JSON-lines transport `[x]`
 
-One JSON object per line, sharing the hub with the TCP transport. Cheapest proof that the sink design works, and the natural backend for a terminal client (for example with `textual`).
-
-- New module `chat_server/jsonl.py` with its own `render` and a parser for incoming commands.
-- Either a second port or a protocol switch on the first line.
-- Tests mirror `tests/test_tcp.py`.
+`chat_server/jsonl.py` listens on a second port (`--jsonl-port`, default 8889) and shares the hub with the `nc` transport, so users on either can talk in the same rooms. One JSON object per line in both directions; the module docstring is the protocol reference. Every server object has a `type`, errors carry a stable `code`, and the first client line must be `{"type": "login", "password", "username"}`. Tests in `tests/test_jsonl.py` mirror the TCP ones, plus one that mixes an `nc` client and a JSON client in a room.
 
 ## 5. WebSocket transport and browser client `[ ]`
 
-Same idea as step 4 but reachable from a browser, which is easier for friends than installing anything.
+Same objects as step 4 but reachable from a browser, which is easier for friends than installing anything.
 
 - Needs one server-side dependency (`websockets`).
 - A single HTML page as the client.
-- Once step 4 exists this is mostly a second `render` and a different socket API.
+- The wire objects and command parser in `jsonl.py` are reusable as is; only the framing (WebSocket frames instead of lines) and the socket API differ.
 
 ## 6. Accounts and TLS `[ ]`
 

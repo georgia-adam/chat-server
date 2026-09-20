@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import logging
 
 from .events import Error, Event, History, Info, Message, Presence, UserJoined, UserLeft
 from .hub import NAME_RULE, Hub, InvalidUsername, Session, UsernameTaken
+from .transport import CLOSE, FAIL_DELAY, QueueSink, password_matches
+
+__all__ = ["ChatServer", "QueueSink", "handle_client", "render", "serve"]
 
 log = logging.getLogger(__name__)
-
-QUEUE_SIZE = 256
-FAIL_DELAY = 2.0  # seconds to stall a client after a wrong password
-_CLOSE = None  # sentinel telling the pump to stop after flushing
 
 
 def render(event: Event) -> bytes:
@@ -40,32 +38,12 @@ def render(event: Event) -> bytes:
     return out.encode()
 
 
-class QueueSink:
-    """Non-blocking sink: events go on a bounded queue drained by a pump task."""
-
-    def __init__(self, maxsize: int = QUEUE_SIZE) -> None:
-        self.queue: asyncio.Queue = asyncio.Queue(maxsize)
-        self.overflowed = False
-
-    def send(self, event: Event) -> None:
-        try:
-            self.queue.put_nowait(event)
-        except asyncio.QueueFull:
-            self.overflowed = True
-
-    def close(self) -> None:
-        try:
-            self.queue.put_nowait(_CLOSE)
-        except asyncio.QueueFull:
-            self.overflowed = True
-
-
 async def pump(sink: QueueSink, writer: asyncio.StreamWriter) -> None:
     """Write queued events to one client. Ends on close sentinel, overflow, or socket error."""
     try:
         while True:
             event = await sink.queue.get()
-            if event is _CLOSE:
+            if event is CLOSE:
                 return
             writer.write(render(event))
             await writer.drain()
@@ -78,11 +56,6 @@ async def pump(sink: QueueSink, writer: asyncio.StreamWriter) -> None:
 
 
 COMMANDS = ("/join", "/who", "/quit")
-
-
-def password_matches(supplied: str, expected: str) -> bool:
-    """Constant-time comparison so response timing does not leak how much of the password matched."""
-    return hmac.compare_digest(supplied.encode(), expected.encode())
 
 
 def _peer(writer: asyncio.StreamWriter) -> str:
@@ -148,7 +121,7 @@ async def handle_client(
                     quitting = True
                     return
                 else:
-                    sink.send(Error(f"Unknown command: {cmd}"))
+                    sink.send(Error(f"Unknown command: {cmd}", "unknown_command"))
                 continue
             hub.say(session, data.decode(errors="replace").strip())
     except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
