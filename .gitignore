@@ -1,3 +1,5 @@
 chat_state.json
 __pycache__/
 *.pyc
+.venv/
+chat_server.egg-info/

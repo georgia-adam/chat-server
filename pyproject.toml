@@ -1,0 +1,13 @@
+[project]
+name = "chat-server"
+version = "0.1.0"
+description = "A small asyncio TCP chat server"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
